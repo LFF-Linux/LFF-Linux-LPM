@@ -25,6 +25,8 @@ sudo chmod 777 /usr/bin/lpm
 ```
 4. Run `lpm search` to see the available packages. If it works, you are good to go!
 
+---
+
 ## Contributing
 
 Thank you for wanting to contribute to LPM! I need help with some things, so if you are a python wizzard, or a little better than me at code, you can help me implement these features!
