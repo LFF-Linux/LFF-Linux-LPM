@@ -310,46 +310,49 @@ def lpm_install(package_name):
         print(f"Error installing package: {e}")
 
 def lpm_remove(package_name):
-    # Block root usage
     if os.geteuid() == 0:
         print("Do not run lpm as root. Exiting.")
         sys.exit(1)
+
     print(f"Removing package: {package_name}")
     package_dir = LPM_DIR / package_name
     installed_packages = load_installed_packages()
     if not package_dir.exists() and package_name not in installed_packages:
         print(f"Package {package_name} is not installed.")
         return
+
+    # List of critical dirs that should never be removed
+    CRITICAL_DIRS = ["/", "/usr", "/bin", "/sbin", "/etc", "/lib", "/lib64", "/home"]
+
     try:
         installer_mode = False
-        installeddirpath = None
-        installedfilepath = None
+        installeddirpaths = []
+        installedfilepaths = []
         username = os.environ.get("USER") or os.environ.get("LOGNAME") or os.getlogin()
+
         if package_name in installed_packages:
             pkgdata = installed_packages[package_name]
             if "installer" in pkgdata or "installerdeb" in pkgdata:
                 installer_mode = True
-                installeddirpath = pkgdata.get("installeddirpath")
-                installedfilepath = pkgdata.get("installedfilepath")
-                # Normalize to lists
-                if installeddirpath:
-                    if isinstance(installeddirpath, str):
-                        installeddirpaths = [installeddirpath.replace("{username}", username)]
-                    else:
-                        installeddirpaths = [dp.replace("{username}", username) for dp in installeddirpath]
-                else:
-                    installeddirpaths = []
-                if installedfilepath:
-                    if isinstance(installedfilepath, str):
-                        installedfilepaths = [installedfilepath.replace("{username}", username)]
-                    else:
-                        installedfilepaths = [fp.replace("{username}", username) for fp in installedfilepath]
-                else:
-                    installedfilepaths = []
+                raw_dirs = pkgdata.get("installeddirpath") or []
+                installeddirpaths = [str(Path(dp).expanduser().resolve()).replace("{username}", username)
+                                     for dp in (raw_dirs if isinstance(raw_dirs, list) else [raw_dirs])]
+                raw_files = pkgdata.get("installedfilepath") or []
+                installedfilepaths = [str(Path(fp).expanduser().resolve()).replace("{username}", username)
+                                      for fp in (raw_files if isinstance(raw_files, list) else [raw_files])]
+
         if installer_mode:
             print("Installer mode removal.")
+
+            # Remove directories
             for dp in installeddirpaths:
                 try:
+                    if not Path(dp).exists():
+                        print(f"Directory does not exist, skipping: {dp}")
+                        continue
+                    if any(dp == c or dp.startswith(c + "/") for c in CRITICAL_DIRS):
+                        print(f"Skipping critical system directory: {dp}")
+                        continue
                     if dp.startswith(str(Path.home())):
                         shutil.rmtree(dp)
                         print(f"Removed directory: {dp}")
@@ -358,8 +361,16 @@ def lpm_remove(package_name):
                         print(f"Removed directory (sudo): {dp}")
                 except Exception as e:
                     print(f"Error removing directory {dp}: {e}")
+
+            # Remove files
             for fp in installedfilepaths:
                 try:
+                    if not Path(fp).exists():
+                        print(f"File does not exist, skipping: {fp}")
+                        continue
+                    if Path(fp).is_dir():
+                        print(f"Skipping directory path in file list: {fp}")
+                        continue
                     if fp.startswith(str(Path.home())):
                         os.remove(fp)
                         print(f"Removed file: {fp}")
@@ -368,19 +379,28 @@ def lpm_remove(package_name):
                         print(f"Removed file (sudo): {fp}")
                 except Exception as e:
                     print(f"Error removing file {fp}: {e}")
+
+            # Remove package folder safely
             if package_dir.exists():
                 shutil.rmtree(package_dir)
-            del installed_packages[package_name]
-            save_installed_packages(installed_packages)
+
+            # Update installed packages
+            if package_name in installed_packages:
+                del installed_packages[package_name]
+                save_installed_packages(installed_packages)
+
             print(f"Package {package_name} removed successfully.")
             return
-        # Normal app removal
+
+        # Normal app removal (non-installer)
         if package_dir.exists():
             shutil.rmtree(package_dir)
         if package_name in installed_packages:
             del installed_packages[package_name]
             save_installed_packages(installed_packages)
+
         print(f"Package {package_name} removed successfully.")
+
     except Exception as e:
         print(f"Error removing package: {e}")
 
